@@ -1,0 +1,28 @@
+{
+  "name": "node-flame",
+  "version": "0.0.1",
+  "description": "Tools for flaming Node with ptrace on Linux",
+  "main": "index.js",
+  "bin": {
+    "node-flame": "./cmd/flame.js"
+  },
+  "scripts": {
+    "install": "node-gyp rebuild"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "async": "^1.4.2",
+    "bindings": "^1.2.1",
+    "bunyan": "^1.5.1",
+    "elfy": "^0.1.0",
+    "nan": "^1.2.0",
+    "process": "^0.11.2",
+    "stackvis": "^0.3.0",
+    "struct": "0.0.8"
+  },
+  "gypfile": true,
+  "devDependencies": {
+    "tape": "^4.2.0",
+    "uber-licence": "^2.0.2"
+  }
+}
