@@ -20,14 +20,13 @@
 
 'use strict';
 
-var tracer = require('bindings')('node_backtrace');
-
 var fs = require('fs');
 var setTimeout = require('timers').setTimeout;
 var clearTimeout = require('timers').clearTimeout;
 
-var HeapReader = require('./lib/heap-reader.js');
-var atos = require('./lib/elf-atos/elf-atos');
+var atos = require('./lib/elf-atos/elf-atos.js');
+var Tracer = require('./tracer.js');
+var resolveSymbols = require('./lib/osx-atos.js');
 
 var NATIVE_FRAME_REGEX = /\[native:(.*)\]/;
 
@@ -36,8 +35,6 @@ module.exports = NodeProfiler;
 function NodeProfiler() {
     this.cpuProfile = [];
     this.duration = 0;
-    this.fd = null;
-    this.heapReader = null;
     this.interval = 0;
     this.isProfiling = false;
     this.pid = 0;
@@ -80,6 +77,7 @@ function profile(pid, duration, interval, cb) {
         ));
     }
 
+    var tracer = self.tracer = new Tracer(pid);
     var result = tracer.attach(pid);
 
     if (!result) {
@@ -91,8 +89,6 @@ function profile(pid, duration, interval, cb) {
     self.cpuProfile = [];
     self.duration = duration;
     self.interval = interval;
-    self.fd = fs.openSync('/proc/' + pid + '/mem', 'r');
-    self.heapReader = new HeapReader(self.fd);
     self.cb = cb;
 
     self.profileTimer = setTimeout(function onProfileEnd() {
@@ -107,6 +103,10 @@ function profile(pid, duration, interval, cb) {
 function sampleAndContinue() {
     var self = this;
 
+    if (!self.isProfiling) {
+        return;
+    }
+
     self._sample();
     self.sampleTimer = setTimeout(function onSample() {
         self._sampleAndContinue();
@@ -115,63 +115,49 @@ function sampleAndContinue() {
 
 function sample() {
     var self = this;
-    var pid = self.pid;
-    var heapReader = self.heapReader;
-    var backtrace = tracer.backtrace(pid);
+    var tracer = self.tracer;
+    var backtrace = tracer.backtrace();
 
-    var frameCount = backtrace[0];
-    var annotatedBacktrace = [];
-
-    // Error reading the frame
-    if (frameCount < 0) {
-        tracer.resume(pid);
-        return;
+    if (backtrace) {
+        self.cpuProfile.push(backtrace);
     }
-
-    for (var i = 0; i < frameCount; i++) {
-        var pc = backtrace[2 * i + 1];
-        var frame = backtrace[2 * i + 2];
-        var frameAnnotation = heapReader.readStackFrameAnnotation(pc, frame);
-
-        if (frameAnnotation) {
-            annotatedBacktrace.push(frameAnnotation);
-        }
-    }
-
-    self.cpuProfile.push(annotatedBacktrace);
-
-    tracer.resume(pid);
 }
 
 function stopProfiling() {
     var self = this;
     var pid = self.pid;
+    var tracer = self.tracer;
     var cb = self.cb;
 
     if (!self.isProfiling) {
         return;
+    } else {
+        self.isProfiling = false;
     }
 
-    if (!tracer.detach(pid)) {
-        return cb(new Error(
+    if (tracer.detach(pid)) {
+        self._resolveNativeFrames(function onNativeResolve(err) {
+            if (err) {
+                return cb(err);
+            }
+
+            self._returnCPUProfile();
+        });
+    } else {
+        cb(new Error(
             'Error detaching from process with pid ' + pid
         ));
     }
-
-    atos.getSymbolicatorForPid(pid, function setSymboliicator(err, s) {
-        if (!err) {
-            self._resolveNativeFrames(s);
-        }
-        self._returnCPUProfile();
-    });
 }
 
-function resolveNativeFrames(symbolicator) {
+function resolveNativeFrames(cb) {
     var self = this;
+    var frames = {};
+    var framesArray = [];
 
     var cpuProfile = self.cpuProfile;
 
-    if (!cpuProfile || !symbolicator) {
+    if (!cpuProfile) {
         return;
     }
 
@@ -183,8 +169,34 @@ function resolveNativeFrames(symbolicator) {
 
             var match = annotation.match(NATIVE_FRAME_REGEX);
             if (match) {
-                var sym = symbolicator.atos(parseInt(match[1], 16));
-                stack[j] = sym + ':[native]';
+                var addr = match[1];
+                if (!frames[addr]) {
+                    framesArray.push(addr);
+                    frames[addr] = true;
+                }
+            }
+        }
+    }
+
+    var symbolTable = resolveSymbols(self.pid, framesArray, function onSymbols(err, symbolTable) {
+        if (err) {
+            return cb(err);
+        }
+        replaceSymbols(cpuProfile, symbolTable);
+        cb(null);
+    });
+}
+
+function replaceSymbols(cpuProfile, symbolTable) {
+    for (var i = 0; i < cpuProfile.length; i++) {
+        var stack = cpuProfile[i];
+
+        for (var j = 0; j < stack.length; j++) {
+            var annotation = stack[j];
+
+            var match = annotation.match(NATIVE_FRAME_REGEX);
+            if (match) {
+                stack[j] = (symbolTable[match[1]] || 'Unknown') + ':native';
             }
         }
     }
@@ -197,15 +209,13 @@ function returnCPUProfile() {
 
     clearTimeout(self.profileTimer);
     clearTimeout(self.sampleTimer);
-    fs.close(self.fd);
     self.cpuProfile = [];
     self.duration = 0;
-    self.fd = null;
-    self.heapReader = null;
     self.interval = 0;
     self.pid = 0;
     self.profileTimer = null;
     self.sampleTimer = null;
+    self.tracer = null;
 
     return cb(null, cpuProfile);
 }
