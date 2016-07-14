@@ -65,7 +65,7 @@ Sampling 24701 for 10s, outputting flame.
 ## Raw Example
 
 ```
-[~/]$ sudo node-flame 2291 raw 10 > /tmp/flame.raw.txt
+[~/]$ sudo node-flame 2291 raw 10 > /tmp/flame.raw
 Sampling 2291 for 10s, outputting raw.
 
 [~/]$ cd ./FlameGraph/
