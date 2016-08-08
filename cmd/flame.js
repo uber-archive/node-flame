@@ -40,8 +40,8 @@ var log = new Bunyan({
     'stream': process.stderr
 });
 
-function die(msg) {
-    console.error(msg);
+function die(msg, err) {
+    console.error(msg, err);
     process.exit(1);
 }
 

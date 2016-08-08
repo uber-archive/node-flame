@@ -93,10 +93,13 @@ function detachLinuxTracer() {
         memReader.destroy();
         self.memReader = null;
     }
+
+    return true;
 }
 
 function LinuxMemoryReader(pid) {
     var self = this;
+    self.pid = pid;
     self.buffer = new Buffer(4);
     self.fd = null;
 }
