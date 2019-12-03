@@ -1,5 +1,7 @@
 ## Synopsis
 
+(This project is deprecated and not maintained.)
+
 Tools for profiling Node.js programs. Uses ptrace to collect and symbolicate
 JavaScript backtraces, extracting human-readable names by walking the V8 stack
 and heap.
